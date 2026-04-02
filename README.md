@@ -160,7 +160,7 @@ bash sideload.sh
 This will:
 1. Download Docker RPMs for RHEL 9
 2. Build and export all Docker images as `.tar` files (`loomin-frontend`, `loomin-backend`, `ollama/ollama`)
-3. Pull Ollama model weights (llama3.2:1b, gemma3:1b, llama3.2:1b)
+3. Pull Ollama model weights (llama3.2:1b, gemma3:1b)
 4. Download the `all-MiniLM-L6-v2` embedding model
 5. Copy deployment scripts, Modelfile, and `docker-compose.prod.yml`
 6. Bundle everything into `loomin-docs-package.tar.gz`
