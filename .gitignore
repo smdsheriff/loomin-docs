@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Build artifacts
+frontend/dist/
+*.egg-info/
+
+# Data (runtime)
+*.db
+*.faiss
+data/
+uploads/
+
+# Docker package output (too large for git)
+deploy/package/
+deploy/loomin-docs-package.tar.gz
+Delivery/bootstrap-package/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local

@@ -1,0 +1,73 @@
+services:
+  frontend:
+    image: loomin-frontend:latest
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - loomin-net
+    restart: unless-stopped
+
+  backend:
+    image: loomin-backend:latest
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:////data/loomin.db
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - EMBEDDING_MODEL_PATH=/models/all-MiniLM-L6-v2
+      - FAISS_INDEX_PATH=/data/faiss_index
+      - UPLOAD_DIR=/data/uploads
+      - DEFAULT_MODEL=${DEFAULT_MODEL:-llama3.2:1b}
+    volumes:
+      - backend-data:/data
+      - embedding-model:/models
+    depends_on:
+      ollama:
+        condition: service_healthy
+    networks:
+      - loomin-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+      - ./ollama-entrypoint.sh:/ollama-entrypoint.sh:ro
+    networks:
+      - loomin-net
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/ollama-entrypoint.sh"]
+    environment:
+      - OLLAMA_MODELS=llama3.2:1b gemma3:1b
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/.ollama-models-ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 120
+      start_period: 15s
+
+volumes:
+  backend-data:
+  embedding-model:
+  ollama-data:
+
+networks:
+  loomin-net:
+    driver: bridge
