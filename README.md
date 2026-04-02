@@ -10,32 +10,6 @@ Loomin-Docs supports **real-time presence awareness** via WebSocket connections:
 
 **Current scope:** Presence awareness (who is connected) with cursor position broadcasting. **Not yet implemented:** Full CRDT-based operational transform for concurrent text editing (e.g., Yjs/Automerge). In the current model, concurrent edits are last-write-wins via the debounced save. For teams requiring true conflict-free collaborative editing, a CRDT layer would need to be added atop the existing TipTap editor.
 
-## Architecture
-
-```mermaid
-graph LR
-    Browser["Browser"]
-
-    subgraph "Docker Network (loomin-net)"
-        Frontend["Nginx<br/>(Frontend)<br/>:80"]
-        Backend["FastAPI<br/>(Backend)<br/>:8000"]
-        Ollama["Ollama<br/>(LLM Server)<br/>:11434"]
-        SQLite[("SQLite<br/>loomin.db")]
-        FAISS[("FAISS<br/>Vector Index")]
-        Uploads[("Uploads<br/>/data/uploads")]
-        EmbModel[("Embedding Model<br/>all-MiniLM-L6-v2")]
-    end
-
-    Browser -->|"HTTP :80"| Frontend
-    Browser <-->|"WebSocket /ws/*"| Frontend
-    Frontend -->|"Proxy /api/*"| Backend
-    Frontend <-->|"Proxy /ws/*"| Backend
-    Backend -->|"Multi-turn /api/chat"| Ollama
-    Backend --- SQLite
-    Backend --- FAISS
-    Backend --- Uploads
-    Backend --- EmbModel
-```
 
 ## Features
 
@@ -256,27 +230,6 @@ All settings are environment-configurable via the backend's `Settings` class:
 | `MAX_CHUNKS_RETRIEVED`     | `5`                     | Top-K chunks for RAG retrieval       |
 | `MIN_SIMILARITY_SCORE`     | `0.25`                  | Minimum FAISS score to include chunk |
 | `MAX_CONVERSATION_HISTORY` | `100`                    | Messages to include in multi-turn context |
-
-## Running the Verification Test
-
-The RAG faithfulness test uploads a document with known content and verifies that the AI answers accurately and refuses to hallucinate.
-
-```bash
-# With the stack running:
-python tests/verify_rag.py
-
-# Against a specific API URL:
-python tests/verify_rag.py --api-url http://192.168.1.100:8000
-
-# With verbose output:
-python tests/verify_rag.py --verbose
-```
-
-The test includes 6 answerable questions (verifying keyword accuracy) and 3 unanswerable questions (verifying refusal to hallucinate). It passes if the overall faithfulness score is at least 70%.
-
-```bash
-make test-rag
-```
 
 ## Service Health Check
 
