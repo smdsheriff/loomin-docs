@@ -4,13 +4,6 @@ A real-time collaborative text editor with an integrated AI assistant sidebar, p
 
 Loomin-Docs combines rich text editing with a Retrieval-Augmented Generation (RAG) pipeline, enabling users to upload documents (.pdf, .md, .txt) and ask context-aware questions answered by locally hosted language models. All data stays on-premises -- nothing leaves the network.
 
-### Collaboration Model
-
-Loomin-Docs supports **real-time presence awareness** via WebSocket connections: multiple users editing the same document see each other's colored avatars in the header bar. The server tracks connected users per document and broadcasts join/leave/cursor events.
-
-**Current scope:** Presence awareness (who is connected) with cursor position broadcasting. **Not yet implemented:** Full CRDT-based operational transform for concurrent text editing (e.g., Yjs/Automerge). In the current model, concurrent edits are last-write-wins via the debounced save. For teams requiring true conflict-free collaborative editing, a CRDT layer would need to be added atop the existing TipTap editor.
-
-
 ## Features
 
 ### Editor & Workspace
