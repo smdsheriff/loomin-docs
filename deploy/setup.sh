@@ -156,7 +156,8 @@ else
     info "Installing Docker RPMs from ${PACKAGE_DIR}/rpms/ ..."
 
     # Disable any external repos to prevent network access attempts
-    dnf install -y --disablerepo='*' --setopt=install_weak_deps=False \
+    # --allowerasing handles version conflicts with system packages (e.g., systemd)
+    dnf install -y --disablerepo='*' --setopt=install_weak_deps=False --allowerasing \
         "${PACKAGE_DIR}"/rpms/*.rpm 2>&1 | while IFS= read -r line; do
         echo "  ${line}"
     done

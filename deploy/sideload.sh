@@ -128,7 +128,9 @@ if command -v dnf &>/dev/null && [[ -f /etc/redhat-release ]]; then
         dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo 2>/dev/null || true
     fi
 
-    dnf download --resolve --alldeps \
+    # Use --resolve (not --alldeps) to avoid pulling system packages like systemd/grub
+    # that conflict with the target RHEL 9 base install
+    dnf download --resolve \
         --destdir="${OUTPUT_DIR}/rpms" \
         docker-ce docker-ce-cli containerd.io docker-compose-plugin docker-buildx-plugin 2>&1 | \
         while IFS= read -r line; do echo "  ${line}"; done
@@ -142,7 +144,7 @@ else
         bash -c '
             dnf install -y dnf-plugins-core yum-utils 2>/dev/null
             dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
-            dnf download --resolve --alldeps \
+            dnf download --resolve \
                 --destdir=/output \
                 docker-ce docker-ce-cli containerd.io docker-compose-plugin docker-buildx-plugin
         ' 2>&1 | while IFS= read -r line; do echo "  ${line}"; done
