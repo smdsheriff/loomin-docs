@@ -279,13 +279,11 @@ if [[ -f "${SCRIPT_DIR}/Makefile" ]]; then
     cp "${SCRIPT_DIR}/Makefile" "${OUTPUT_DIR}/"
 fi
 
-# Copy Modelfile alongside docker-compose.yml (mounted as ./Modelfile in prod compose)
+# Copy Modelfile as documentation artifact (system prompt is applied at API level)
 MODELFILE="${PROJECT_ROOT}/backend/Modelfile"
 if [[ -f "${MODELFILE}" ]]; then
     cp "${MODELFILE}" "${OUTPUT_DIR}/Modelfile"
-    success "Modelfile copied to package root for Ollama custom model creation."
-else
-    warn "Modelfile not found at ${MODELFILE} — custom model won't be created on target."
+    success "Modelfile copied (documentation artifact — system prompt applied via API)."
 fi
 success "Deployment scripts copied."
 

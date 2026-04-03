@@ -32,7 +32,9 @@
 #           └── ...
 # =============================================================================
 
-set -euo pipefail
+# Note: do NOT use pipefail — dnf/docker commands piped through 'while read'
+# return non-zero on warnings, which would kill the script prematurely.
+set -eu
 
 # ---------------------------------------------------------------------------
 # Color output helpers
@@ -155,19 +157,54 @@ if command -v docker &>/dev/null; then
 else
     info "Installing Docker RPMs from ${PACKAGE_DIR}/rpms/ ..."
 
-    # Disable any external repos to prevent network access attempts
-    # --allowerasing handles version conflicts with system packages (e.g., systemd)
-    dnf install -y --disablerepo='*' --setopt=install_weak_deps=False --allowerasing \
-        "${PACKAGE_DIR}"/rpms/*.rpm 2>&1 | while IFS= read -r line; do
-        echo "  ${line}"
-    done
+    # Step 1: Install only core Docker packages to avoid system conflicts
+    # (protected packages like systemd/dnf/grub are skipped)
+    info "Installing core Docker packages..."
+    DOCKER_RPMS=$(find "${PACKAGE_DIR}/rpms" -maxdepth 1 \
+        \( -name "docker-ce-[0-9]*.rpm" \
+        -o -name "docker-ce-cli*.rpm" \
+        -o -name "containerd.io*.rpm" \
+        -o -name "docker-compose-plugin*.rpm" \
+        -o -name "docker-buildx-plugin*.rpm" \) | head -20)
+
+    if [[ -n "${DOCKER_RPMS}" ]]; then
+        # shellcheck disable=SC2086
+        dnf install -y --disablerepo='*' --allowerasing --nobest \
+            ${DOCKER_RPMS} 2>&1 | while IFS= read -r line; do
+            echo "  ${line}"
+        done
+    fi
+
+    # Step 2: If that wasn't enough, try all RPMs but skip conflicting ones
+    if ! command -v docker &>/dev/null; then
+        warn "Core install incomplete. Retrying with --skip-broken..."
+        dnf install -y --disablerepo='*' --allowerasing --skip-broken \
+            "${PACKAGE_DIR}"/rpms/*.rpm 2>&1 | while IFS= read -r line; do
+            echo "  ${line}"
+        done
+    fi
 
     if ! command -v docker &>/dev/null; then
-        error "Docker installation failed. Check RPM compatibility with this RHEL version."
+        error "Docker installation failed."
+        error "Try manually: dnf install -y --allowerasing <PACKAGE_DIR>/rpms/docker-ce-*.rpm <PACKAGE_DIR>/rpms/containerd.io*.rpm"
         exit 1
     fi
 
     success "Docker RPMs installed successfully."
+fi
+
+# Ensure curl is available (needed for health checks later)
+if ! command -v curl &>/dev/null; then
+    warn "curl not found. Installing from RPMs if available..."
+    CURL_RPM=$(find "${PACKAGE_DIR}/rpms" -name "curl-*.rpm" -o -name "libcurl-*.rpm" 2>/dev/null | head -5)
+    if [[ -n "${CURL_RPM}" ]]; then
+        # shellcheck disable=SC2086
+        dnf install -y --disablerepo='*' --skip-broken ${CURL_RPM} 2>/dev/null || true
+    fi
+    # If still not available, try wget fallback or warn
+    if ! command -v curl &>/dev/null; then
+        warn "curl still not available. Health checks will use docker exec fallback."
+    fi
 fi
 
 # Enable and start Docker daemon
@@ -279,13 +316,16 @@ success "Backend data volume initialized."
 # ---------------------------------------------------------------------------
 header "Starting Loomin-Docs Stack"
 
-COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
-
-if [[ ! -f "${COMPOSE_FILE}" ]]; then
-    error "docker-compose.yml not found at ${COMPOSE_FILE}"
-    error "Ensure this script is located alongside docker-compose.yml in the deploy/ directory."
+# Look for docker-compose.yml in PACKAGE_DIR first, then SCRIPT_DIR
+if [[ -f "${PACKAGE_DIR}/docker-compose.yml" ]]; then
+    COMPOSE_FILE="${PACKAGE_DIR}/docker-compose.yml"
+elif [[ -f "${SCRIPT_DIR}/docker-compose.yml" ]]; then
+    COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
+else
+    error "docker-compose.yml not found in ${PACKAGE_DIR} or ${SCRIPT_DIR}"
     exit 1
 fi
+info "Using compose file: ${COMPOSE_FILE}"
 
 info "Starting services with docker compose..."
 docker compose -f "${COMPOSE_FILE}" up -d 2>&1 | while IFS= read -r line; do
@@ -298,6 +338,18 @@ success "Docker Compose services started."
 # ---------------------------------------------------------------------------
 header "Waiting for Services"
 
+check_url() {
+    # Try curl first, fall back to wget, then python
+    local url="$1"
+    if command -v curl &>/dev/null; then
+        curl -sf -o /dev/null --max-time 3 "${url}" 2>/dev/null
+    elif command -v wget &>/dev/null; then
+        wget -q --spider --timeout=3 "${url}" 2>/dev/null
+    else
+        python3 -c "import urllib.request; urllib.request.urlopen('${url}', timeout=3)" 2>/dev/null
+    fi
+}
+
 wait_for_service() {
     local name="$1"
     local url="$2"
@@ -306,13 +358,12 @@ wait_for_service() {
 
     info "Waiting for ${name} at ${url} (timeout: ${max_wait}s)..."
     while [[ ${elapsed} -lt ${max_wait} ]]; do
-        if curl -sf -o /dev/null --max-time 3 "${url}" 2>/dev/null; then
+        if check_url "${url}"; then
             success "${name} is ready. (${elapsed}s)"
             return 0
         fi
         sleep 2
         elapsed=$((elapsed + 2))
-        # Print a dot every 10 seconds to show progress
         if (( elapsed % 10 == 0 )); then
             echo -ne "  ... ${elapsed}s elapsed\r"
         fi
