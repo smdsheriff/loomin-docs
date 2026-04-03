@@ -13,6 +13,11 @@ services:
     networks:
       - loomin-net
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
 
   backend:
     image: loomin-backend:latest
@@ -40,6 +45,11 @@ services:
       timeout: 5s
       retries: 10
       start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
 
   ollama:
     image: ollama/ollama:latest
@@ -60,11 +70,19 @@ services:
       timeout: 3s
       retries: 120
       start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
 
 volumes:
   backend-data:
+    external: true
   embedding-model:
+    external: true
   ollama-data:
+    external: true
 
 networks:
   loomin-net:

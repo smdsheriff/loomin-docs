@@ -283,6 +283,7 @@ fi
 MODELFILE="${PROJECT_ROOT}/backend/Modelfile"
 if [[ -f "${MODELFILE}" ]]; then
     cp "${MODELFILE}" "${OUTPUT_DIR}/Modelfile"
+    cp "${MODELFILE}" "${OUTPUT_DIR}/models/Modelfile"
     success "Modelfile copied (documentation artifact — system prompt applied via API)."
 fi
 success "Deployment scripts copied."

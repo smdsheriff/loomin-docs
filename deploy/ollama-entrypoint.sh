@@ -10,12 +10,22 @@ rm -f "$READY_FILE"
 ollama serve &
 SERVER_PID=$!
 
-# Wait for server to be ready
+# Forward SIGTERM to ollama for graceful shutdown
+trap 'kill $SERVER_PID; wait $SERVER_PID; exit $?' TERM INT
+
+# Wait for server to be ready (with timeout)
 echo "[model-loader] Waiting for Ollama server..."
+ELAPSED=0
+TIMEOUT=60
 until ollama list >/dev/null 2>&1; do
   sleep 1
+  ELAPSED=$((ELAPSED + 1))
+  if [ "$ELAPSED" -ge "$TIMEOUT" ]; then
+    echo "[model-loader] ERROR: Ollama server failed to start within ${TIMEOUT}s"
+    exit 1
+  fi
 done
-echo "[model-loader] Ollama server is ready."
+echo "[model-loader] Ollama server is ready. (${ELAPSED}s)"
 
 # Give Ollama a moment to index pre-loaded model blobs from the volume
 sleep 2
@@ -24,12 +34,12 @@ ollama list
 
 # Pull or verify each model
 for model in $MODELS; do
-  BASE_NAME=$(echo "$model" | cut -d: -f1)
-  if ollama list | grep -q "$BASE_NAME"; then
+  # Check exact model name match (not substring)
+  if ollama list | awk '{print $1}' | grep -qx "$model"; then
     echo "[model-loader] $model available (pre-loaded or cached)."
   else
-    echo "[model-loader] $model not found. Attempting pull..."
-    if ollama pull "$model" 2>&1; then
+    echo "[model-loader] $model not found. Attempting pull (10s timeout)..."
+    if timeout 10 ollama pull "$model" 2>&1; then
       echo "[model-loader] $model pulled successfully."
     else
       echo "[model-loader] WARNING: Could not pull $model (expected in air-gapped mode)."
@@ -51,5 +61,6 @@ MODEL_COUNT=$(ollama list | tail -n +2 | wc -l)
 touch "$READY_FILE"
 echo "[model-loader] $MODEL_COUNT model(s) available. Readiness marker created."
 
-# Keep the server in the foreground
+# Keep the server in the foreground and propagate its exit code
 wait $SERVER_PID
+exit $?

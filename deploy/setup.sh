@@ -388,42 +388,31 @@ wait_for_service "Frontend" "http://localhost:80" 30 || {
 # ---------------------------------------------------------------------------
 # 9. Verify Ollama model availability
 # ---------------------------------------------------------------------------
-header "Verifying Ollama Model"
+header "Verifying Ollama Models"
 
-info "Checking if llama3 model is available in Ollama..."
+info "Checking available models in Ollama..."
 
-# List models currently known to Ollama
-MODELS_RESPONSE=$(curl -sf http://localhost:11434/api/tags 2>/dev/null || echo "{}")
-if echo "${MODELS_RESPONSE}" | grep -qi "llama3"; then
-    success "llama3 model is available in Ollama."
-else
-    warn "llama3 model not yet listed. Attempting to register it..."
-
-    # If the blob files were copied correctly, Ollama should detect them.
-    # Try creating the model from a Modelfile if available
-    if [[ -f "${PACKAGE_DIR}/models/Modelfile" ]]; then
-        info "Found Modelfile. Creating model via 'ollama create'..."
-        docker compose -f "${COMPOSE_FILE}" exec -T ollama \
-            ollama create llama3 -f /root/.ollama/models/Modelfile 2>&1 | while IFS= read -r line; do
-            echo "  ${line}"
-        done
-    else
-        # Attempt to trigger model detection by calling ollama list
-        docker compose -f "${COMPOSE_FILE}" exec -T ollama ollama list 2>&1 | while IFS= read -r line; do
-            echo "  ${line}"
-        done
-    fi
-
-    # Re-check
-    sleep 3
+# Use check_url helper (handles curl/wget/python fallback)
+MODELS_RESPONSE=""
+if command -v curl &>/dev/null; then
     MODELS_RESPONSE=$(curl -sf http://localhost:11434/api/tags 2>/dev/null || echo "{}")
-    if echo "${MODELS_RESPONSE}" | grep -qi "llama3"; then
-        success "llama3 model is now available."
-    else
-        warn "llama3 model may not be fully registered."
-        warn "You may need to manually run: docker compose exec ollama ollama list"
-        warn "Or copy the model manifest files into the correct Ollama directory."
-    fi
+else
+    MODELS_RESPONSE=$(python3 -c "import urllib.request,json; print(urllib.request.urlopen('http://localhost:11434/api/tags',timeout=5).read().decode())" 2>/dev/null || echo "{}")
+fi
+
+if echo "${MODELS_RESPONSE}" | grep -qi "llama3.2"; then
+    success "llama3.2 model is available in Ollama."
+else
+    warn "llama3.2 model not detected. Listing models via docker exec..."
+    docker compose -f "${COMPOSE_FILE}" exec -T ollama ollama list 2>&1 | while IFS= read -r line; do
+        echo "  ${line}"
+    done
+fi
+
+if echo "${MODELS_RESPONSE}" | grep -qi "gemma3"; then
+    success "gemma3 model is available in Ollama."
+else
+    warn "gemma3 model not detected (non-critical — llama3.2 is the default)."
 fi
 
 # ---------------------------------------------------------------------------
