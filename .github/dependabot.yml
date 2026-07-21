@@ -1,4 +1,11 @@
 version: 2
+
+# Grouping notes:
+# A dependency lands in the FIRST group whose patterns it matches, so the
+# specific groups are declared before the catch-all. Major bumps are left
+# ungrouped on purpose — they carry breaking changes and deserve to be
+# reviewed and merged one at a time.
+
 updates:
   - package-ecosystem: pip
     directory: /backend
@@ -8,6 +15,10 @@ updates:
     labels: ["dependencies", "backend"]
     commit-message:
       prefix: "chore(deps)"
+    groups:
+      backend-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: npm
     directory: /frontend
@@ -18,8 +29,27 @@ updates:
     commit-message:
       prefix: "chore(deps)"
     groups:
+      # TipTap ships its extensions as a fleet — bumping them apart breaks
+      # the editor, since @tiptap/react and the extensions share a core.
       tiptap:
         patterns: ["@tiptap/*"]
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react"
+          - "@types/react-dom"
+      build-tooling:
+        patterns:
+          - "vite"
+          - "@vitejs/*"
+          - "typescript"
+          - "tailwindcss"
+          - "postcss"
+          - "autoprefixer"
+      frontend-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: docker
     directories:
@@ -30,6 +60,10 @@ updates:
     labels: ["dependencies", "docker"]
     commit-message:
       prefix: "chore(deps)"
+    groups:
+      base-images:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: github-actions
     directory: /
@@ -38,3 +72,6 @@ updates:
     labels: ["dependencies", "ci"]
     commit-message:
       prefix: "chore(deps)"
+    groups:
+      actions:
+        patterns: ["*"]

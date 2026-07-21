@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `.editorconfig`.
 
 ### Changed
+- Group Dependabot updates by ecosystem and library family (TipTap, React, build tooling) so routine bumps arrive as a handful of pull requests instead of one per dependency. The first unguarded run opened 17 at once. Major bumps stay ungrouped so breaking changes are reviewed individually.
 - Rewrote `README.md` for an open-source audience: badges, table of contents, local development instructions without Docker, hardware expectations, roadmap, and license notes for bundled models.
 - Corrected `README.md` and `ARCHITECTURE.md` to describe only what the code actually implements (see Removed).
 
