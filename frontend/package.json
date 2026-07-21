@@ -18,12 +18,12 @@
     "@tiptap/starter-kit": "^2.6.0",
     "lucide-react": "^0.400.0",
     "react": "^18.3.0",
-    "react-dom": "^18.3.0",
+    "react-dom": "^19.2.7",
     "react-markdown": "^9.0.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.0",
-    "@types/react-dom": "^18.3.0",
+    "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.3.0",
     "autoprefixer": "^10.4.19",
     "postcss": "^8.4.38",
