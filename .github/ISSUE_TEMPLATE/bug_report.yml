@@ -1,0 +1,89 @@
+name: Bug Report
+description: Report something that isn't working as documented
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a report. Please don't use this form for security
+        vulnerabilities — follow [SECURITY.md](../blob/main/SECURITY.md) instead.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the bug and what you expected instead.
+      placeholder: |
+        Uploading a PDF returns 500 instead of indexing it.
+        I expected the file to appear in the Files tab with a chunk count.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Which part is affected?
+      options:
+        - Frontend (editor, sidebar, UI)
+        - Backend (API, RAG, PII)
+        - Ollama / model inference
+        - Deployment (Docker, air-gapped setup)
+        - Documentation
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: How are you running it?
+      options:
+        - Docker Compose (development)
+        - Docker Compose (air-gapped production)
+        - Services run directly (uvicorn + vite)
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Docker version, and the model you selected.
+      placeholder: |
+        OS: RHEL 9.4
+        Docker: 27.1.1
+        Model: llama3.2:1b
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: |
+        Output from `docker compose logs backend` (or the failing service).
+        Please redact anything sensitive — this is rendered as a code block automatically.
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and this hasn't been reported.
+          required: true
+        - label: I redacted any credentials or personal data from the logs above.
+          required: true

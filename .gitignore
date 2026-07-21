@@ -8,12 +8,15 @@ venv/
 # Build artifacts
 frontend/dist/
 *.egg-info/
+.ruff_cache/
+.pytest_cache/
 
 # Data (runtime)
 *.db
 *.faiss
 data/
 uploads/
+.local/
 
 # Docker package output (too large for git)
 deploy/package/
@@ -31,5 +34,7 @@ Delivery/bootstrap-package/
 Thumbs.db
 
 # Environment
+# NOTE: .env.example IS tracked — it documents every supported setting.
 .env
-.env.local
+.env.*
+!.env.example

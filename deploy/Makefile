@@ -116,9 +116,9 @@ shell-ollama: ## Open a shell in the Ollama container
 ollama-models: ## List models available in Ollama
 	$(COMPOSE) exec ollama ollama list
 
-.PHONY: test-rag
-test-rag: ## Run the RAG faithfulness verification test
-	python3 $(SCRIPT_DIR)/../tests/verify_rag.py --api-url http://localhost:8000
+.PHONY: lint
+lint: ## Lint the backend with ruff (pip install ruff)
+	ruff check $(SCRIPT_DIR)/../backend
 
 .PHONY: health
 health: ## Check health of all services

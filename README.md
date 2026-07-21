@@ -1,233 +1,352 @@
 # Loomin-Docs
 
-A real-time collaborative text editor with an integrated AI assistant sidebar, powered by local LLMs via Ollama. Designed to run entirely self-contained on air-gapped RHEL 9 environments with no internet access.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![CI](https://github.com/smdsheriff/loomin-docs/actions/workflows/ci.yml/badge.svg)](https://github.com/smdsheriff/loomin-docs/actions/workflows/ci.yml)
+[![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/)
+[![React 18](https://img.shields.io/badge/react-18-61dafb.svg)](https://react.dev/)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-Loomin-Docs combines rich text editing with a Retrieval-Augmented Generation (RAG) pipeline, enabling users to upload documents (.pdf, .md, .txt) and ask context-aware questions answered by locally hosted language models. All data stays on-premises -- nothing leaves the network.
+A rich text editor with an integrated AI assistant sidebar, powered by local LLMs via [Ollama](https://ollama.com). Designed to run entirely self-contained — including on air-gapped RHEL 9 environments with no internet access.
+
+Loomin-Docs pairs a TipTap editor with a Retrieval-Augmented Generation (RAG) pipeline. Upload documents (`.pdf`, `.md`, `.txt`) and ask context-aware questions answered by locally hosted language models. **No data ever leaves your network** — there are no third-party API calls, no telemetry, and no account system.
+
+> **Why this exists.** Most AI writing tools require shipping your documents to someone else's servers. Loomin-Docs is for teams who can't do that: regulated industries, classified networks, or anyone who just wants their drafts to stay on their own hardware.
+
+---
+
+## Table of Contents
+
+- [Features](#features)
+- [Screenshots](#screenshots)
+- [Technology Stack](#technology-stack)
+- [Quick Start](#quick-start)
+- [Local Development (without Docker)](#local-development-without-docker)
+- [Air-Gapped Deployment (RHEL 9)](#air-gapped-deployment-rhel-9)
+- [Configuration](#configuration)
+- [API Reference](#api-reference)
+- [Project Structure](#project-structure)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
+- [Security](#security)
+- [License](#license)
+- [Acknowledgements](#acknowledgements)
+
+---
 
 ## Features
 
 ### Editor & Workspace
-- **Rich Text Editor** -- TipTap-based editor with Markdown support, formatting toolbar (headings, bold, italic, underline, lists, code blocks, blockquotes), and real-time auto-save.
-- **Multi-Format Export** -- Export documents as `.txt`, `.md` (Markdown), or `.html` with formatting preserved via dropdown menu.
-- **Document Versioning** -- Every edit is auto-saved with version history in SQLite. Browse, preview, and restore previous versions from the History tab in the sidebar.
-- **Contextual Editing** -- Select text in the editor, click Summarize or Improve via the floating bubble menu. Review the AI's suggestion, then Accept or Discard before it modifies the document.
+- **Rich Text Editor** — TipTap-based editor with Markdown input rules and a formatting toolbar (headings, bold, italic, underline, strikethrough, lists, code blocks, blockquotes), plus debounced auto-save.
+- **Multi-Format Export** — Export the active document as `.txt`, `.md`, or `.html` from the header dropdown.
+- **Document Versioning** — Every update writes a new version to SQLite. Browse, preview, and restore prior versions from the History tab.
+- **Contextual Editing** — Select text, then choose Summarize or Improve from the floating bubble menu. Review the suggestion and Accept or Discard before it touches the document.
+- **Resizable Sidebar** — Drag the divider to size the assistant panel between 320 and 600 px.
 
 ### AI Assistant Sidebar
-- **AI Chat Assistant** -- Persistent three-tab sidebar (Chat, Files, History) with multi-turn conversation context preserved across tab switches and model changes.
-- **RAG Pipeline** -- FAISS vector search with similarity threshold filtering ensures answers are grounded in both the active document content AND uploaded files, not hallucinations.
-- **Contextual RAG** -- Chat responses use dual context: the current editor document (up to 2000 chars, HTML-stripped) plus uploaded file chunks retrieved via FAISS similarity search.
-- **RAG-Grounded Rewrites** -- Summarize and Improve operations retrieve relevant file chunks and inject them as reference context, producing factually grounded rewrites with inline `[Source N]` citations.
-- **Clickable Citations** -- AI responses include inline citation badges that resolve `[Source N]` markers to source files. Clicking navigates to the Files tab and highlights the referenced file.
-- **Model Selector** -- Toggle between multiple local models (`llama3.2:1b`, `gemma3:1b`, `llama3.2:1b`) via Ollama API. Conversation history is preserved when switching.
+- **Multi-Turn Chat** — Three-tab sidebar (Chat, Files, History). All panels stay mounted, so conversation state survives tab switches and model changes.
+- **Dual-Context RAG** — Answers are grounded in *both* the current editor document and your uploaded files. FAISS similarity search with a configurable score threshold filters out weak matches instead of letting the model improvise.
+- **RAG-Grounded Rewrites** — Summarize and Improve retrieve relevant file chunks and inject them as reference context, producing rewrites with inline `[Source N]` citations.
+- **Clickable Citations** — Inline citation badges resolve `[Source N]` markers to their source file. Clicking one jumps to the Files tab and highlights that file.
+- **Model Selector** — Switch between any models available in your Ollama instance (`llama3.2:1b` and `gemma3:1b` ship by default). Conversation history is preserved across switches.
+- **Streaming Responses** — Tokens stream to the browser over Server-Sent Events.
 
-### Asset Management (Files Tab)
-- **Document Upload** -- Upload `.pdf`, `.md`, and `.txt` files (drag-and-drop or click). Content is automatically chunked, embedded with all-MiniLM-L6-v2, and indexed in FAISS.
-- **File Toggle** -- Enable/disable individual files from RAG context via toggle switch without deleting them. Only active files contribute to AI responses.
-- **Chunk Previews** -- Expand any file to view its indexed text chunks inline with chunk index and content preview.
+### Asset Management
+- **Document Upload** — Drag-and-drop or click to upload `.pdf`, `.md`, and `.txt` files (50 MB limit). Content is chunked (~375 words with 38-word overlap), embedded with `all-MiniLM-L6-v2`, and indexed in FAISS.
+- **File Toggle** — Enable or disable individual files as RAG context without deleting them. Only active files contribute to answers.
+- **Chunk Previews** — Expand any file to inspect exactly which text chunks were indexed.
 
-### Observability
-- **Token Visualization** -- Segmented progress bar showing three components: document tokens (blue), file chunk tokens (amber), and free context window (gray), with percentage labels.
-- **Latency Tracing** -- Every AI response includes expandable metadata: `request_id`, retrieval time, generation time, total time, tokens/second, model name, and chunk count.
-- **PII Sanitization** -- Sensitive data (SSN, credit cards, emails, API keys, AWS keys, phone numbers) is masked at four interception points before reaching the LLM.
+### Observability & Privacy
+- **Token Visualization** — Segmented bar showing document tokens, file-chunk tokens, and remaining context window, with percentages.
+- **Latency Tracing** — Every AI response carries expandable metadata: `request_id`, retrieval time, generation time, total time, tokens/second, model name, and chunk count.
+- **PII Sanitization** — SSNs, credit cards, emails, API keys, AWS keys, and phone numbers are masked at four interception points before any text reaches the LLM.
 
-### Collaboration & Deployment
-- **Real-Time Presence** -- WebSocket-based collaboration awareness: connected users appear as colored avatar circles in the header bar with live join/leave updates.
-- **Custom Modelfile** -- Ollama Modelfile with RAG-grounded 7-rule system prompt is auto-loaded via `ollama create loomin` at container startup.
-- **Air-Gap Ready** -- The entire stack runs offline on a single RHEL 9 VM with no external dependencies. Dual Docker Compose files for development (with build) and production (image-only).
+### Deployment
+- **Fully Offline** — The whole stack runs on a single VM with no external dependencies at runtime.
+- **Dual Compose Files** — `docker-compose.yml` builds from source for development; `docker-compose.prod.yml` is image-only for air-gapped targets.
+- **Sideload Tooling** — `sideload.sh` bundles Docker RPMs, images, model weights, and embeddings into a single transferable archive; `setup.sh` bootstraps the target VM from it.
+
+---
+
+## Screenshots
+
+> Screenshots are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) if you'd like to add them. Place images under `docs/images/` and reference them here.
+
+---
 
 ## Technology Stack
 
-| Component         | Technology                        | Purpose                                    |
-|-------------------|-----------------------------------|--------------------------------------------|
-| Frontend          | React 18, TypeScript, TipTap, TailwindCSS | Rich text editor, AI sidebar, presence UI |
-| Reverse Proxy     | Nginx                             | Static assets, API proxy, WebSocket proxy  |
-| Backend           | Python 3.11, FastAPI, SQLAlchemy  | REST API, WebSocket, RAG pipeline, PII     |
-| Database          | SQLite (via aiosqlite)            | Document versions, chat history, file metadata |
-| Vector Store      | FAISS (IndexFlatIP)               | Cosine similarity search over document chunks |
-| Embedding Model   | all-MiniLM-L6-v2 (384-dim)       | Text-to-vector embeddings (L2-normalized)  |
-| LLM               | llama3.2:1b, gemma3:1b, llama3.2:1b (via Ollama) | Multi-model inference |
-| Orchestration     | Docker Compose                    | Three-container management with health checks |
-| Target OS         | RHEL 9 (air-gapped)              | Production deployment                      |
+| Component       | Technology                                    | Purpose                                        |
+|-----------------|-----------------------------------------------|------------------------------------------------|
+| Frontend        | React 18, TypeScript, TipTap, TailwindCSS     | Rich text editor and AI sidebar                |
+| Reverse Proxy   | Nginx                                         | Static assets and API proxy (SSE-aware)        |
+| Backend         | Python 3.11, FastAPI, SQLAlchemy (async)      | REST API, RAG pipeline, PII sanitization       |
+| Database        | SQLite (via `aiosqlite`)                      | Documents, versions, chat history, file metadata |
+| Vector Store    | FAISS (`IndexFlatIP`)                         | Cosine similarity search over document chunks  |
+| Embedding Model | `all-MiniLM-L6-v2` (384-dim, L2-normalized)   | Text-to-vector embeddings                      |
+| LLM Runtime     | Ollama (`llama3.2:1b`, `gemma3:1b` by default)| Local inference, no external API calls         |
+| Orchestration   | Docker Compose                                | Three containers with health-check gating      |
 
-## Project Structure
+---
 
-```
-loomin-docs/
-├── frontend/                       # React + TypeScript application
-│   ├── Dockerfile                  # Multi-stage: Node builder -> Nginx Alpine
-│   ├── nginx.conf                  # Reverse proxy + WebSocket proxy + timeouts
-│   ├── public/
-│   │   └── favicon.svg             # Blue document icon favicon
-│   ├── src/
-│   │   ├── App.tsx                 # Root component: state, handlers, hook wiring
-│   │   ├── components/
-│   │   │   ├── Editor/
-│   │   │   │   ├── Editor.tsx      # TipTap editor with BubbleMenu + replaceSelection
-│   │   │   │   └── Toolbar.tsx     # Formatting toolbar (H1-H3, bold, lists, code)
-│   │   │   ├── Layout.tsx          # Header bar: title, presence, export, shortcuts
-│   │   │   ├── Sidebar/
-│   │   │   │   ├── Sidebar.tsx     # Three-tab container (Chat, Files, History)
-│   │   │   │   ├── ChatPanel.tsx   # AI chat: SSE streaming, citations, actions
-│   │   │   │   ├── FilesPanel.tsx  # File upload, toggle, chunk preview
-│   │   │   │   ├── VersionPanel.tsx # Version history: browse, preview, restore
-│   │   │   │   └── ModelSelector.tsx # Ollama model dropdown
-│   │   │   └── TokenVisualization/
-│   │   │       └── TokenBar.tsx    # Segmented context window bar (doc/files/free)
-│   │   ├── hooks/
-│   │   │   ├── useApi.ts           # React hooks: useDocuments, useChat, useFiles, useModels, useTokenCount
-│   │   │   └── usePresence.ts      # WebSocket presence hook (users, cursor tracking)
-│   │   ├── services/
-│   │   │   └── api.ts              # HTTP client, SSE parser, file/toggle/chunk APIs
-│   │   └── types/
-│   │       └── index.ts            # TypeScript interfaces (15+ types)
-│   └── package.json
-├── backend/                        # Python + FastAPI application
-│   ├── Dockerfile                  # Python 3.11 slim
-│   ├── Modelfile                   # Ollama system prompt (7 rules, temp 0.7, top_p 0.9)
-│   ├── requirements.txt            # FastAPI, SQLAlchemy, FAISS, sentence-transformers, etc.
-│   └── app/
-│       ├── main.py                 # FastAPI app: lifespan, CORS, router registration
-│       ├── core/
-│       │   ├── config.py           # Pydantic Settings (9 env-configurable params)
-│       │   ├── pii.py              # PII sanitization (6 regex patterns, offset tracking)
-│       │   └── tracing.py          # RequestTrace dataclass (request_id, timing, throughput)
-│       ├── api/routes/
-│       │   ├── chat.py             # Chat (SSE streaming), summarize, improve + RAG grounding
-│       │   ├── collaboration.py    # WebSocket presence (PresenceManager, cursor tracking)
-│       │   ├── documents.py        # CRUD with auto-versioning on every update
-│       │   ├── files.py            # Upload, toggle, chunk preview, delete endpoints
-│       │   └── models.py           # Ollama model list + segmented token count
-│       ├── rag/
-│       │   ├── embeddings.py       # Sentence-transformers with air-gapped error handling
-│       │   ├── indexer.py          # FAISS IndexFlatIP (thread-safe, disk-persisted)
-│       │   └── retriever.py        # Similarity search filtered by is_active files
-│       ├── services/
-│       │   ├── ollama.py           # Async HTTP client (generate, chat_stream, list_models)
-│       │   └── document.py         # PDF/MD/TXT parsing, chunking, hybrid token estimation
-│       └── models/
-│           ├── database.py         # SQLAlchemy models (5 tables) + lightweight migrations
-│           └── schemas.py          # Pydantic request/response schemas (20+ models)
-├── deploy/                         # Deployment infrastructure
-│   ├── docker-compose.yml          # Development (with build directives + Modelfile mount)
-│   ├── docker-compose.prod.yml     # Air-gapped production (image-only, no build)
-│   ├── ollama-entrypoint.sh        # Model preloading + ollama create + readiness marker
-│   ├── setup.sh                    # Air-gapped RHEL 9 bootstrap (RPMs, images, volumes)
-│   ├── sideload.sh                 # Offline package builder (~15-25 GB archive)
-│   └── Makefile                    # Convenience targets (build, up, down, logs, health)
-├── tests/
-│   └── verify_rag.py              # RAG faithfulness test (9 cases, SSE-aware, scoring)
-├── README.md                      # This file
-└── ARCHITECTURE.md                # Detailed system architecture and data flows
-```
+## Quick Start
 
-## Quick Start (Development)
-
-Prerequisites: Docker Engine with the Compose plugin.
+**Prerequisites:** Docker Engine with the Compose plugin. First boot pulls ~2 GB of model weights, so allow a few minutes.
 
 ```bash
+git clone https://github.com/smdsheriff/loomin-docs.git
 cd loomin-docs/deploy
 
-# Build and start all services
-docker compose up --build
-
-# Or using Make
-make build && make up
+docker compose up --build     # or: make build && make up
 ```
 
-The application will be available at [http://localhost](http://localhost). The API docs are at [http://localhost:8000/docs](http://localhost:8000/docs).
+| Service        | URL                                              |
+|----------------|--------------------------------------------------|
+| Application    | <http://localhost>                               |
+| API docs       | <http://localhost:8000/docs>                     |
+| Ollama         | <http://localhost:11434>                         |
 
-The Ollama entrypoint automatically pulls `llama3.2:1b`, `gemma3:1b`, and `llama3.2:1b` on first boot, then creates the custom `loomin` model from the bundled Modelfile.
+The Ollama entrypoint pulls `llama3.2:1b` and `gemma3:1b` on first boot and writes a readiness marker; the backend waits on that health check before starting.
 
 ```bash
-# View logs
-make logs
-
-# Stop the stack
-make down
+make logs      # tail all service logs
+make health    # HTTP status of all three services
+make down      # stop the stack
+make clean     # stop and destroy volumes (deletes all data)
 ```
+
+Run `make help` in `deploy/` for the full target list.
+
+### Hardware Expectations
+
+| Resource | Minimum      | Recommended | Notes                                   |
+|----------|--------------|-------------|-----------------------------------------|
+| CPU      | 4 cores      | 8+ cores    | Inference is CPU-bound without a GPU    |
+| RAM      | 8 GB         | 16+ GB      | Multiple models may be resident at once |
+| Disk     | 20 GB        | 50+ GB      | Model weights plus document storage     |
+| GPU      | Not required | NVIDIA GPU  | Substantially faster generation         |
+
+---
+
+## Local Development (without Docker)
+
+Useful when iterating on the frontend or backend directly. You still need an Ollama server running somewhere.
+
+**1. Start Ollama and pull a model:**
+
+```bash
+ollama serve &
+ollama pull llama3.2:1b
+```
+
+**2. Backend:**
+
+```bash
+cd backend
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+
+cp ../.env.example .env        # then edit paths for local (non-container) use
+uvicorn app.main:app --reload --port 8000
+```
+
+By default the backend writes to `/data`, which suits containers but not a laptop. Override the paths in `.env`:
+
+```dotenv
+DATABASE_URL=sqlite+aiosqlite:///./loomin.db
+FAISS_INDEX_PATH=./.local/faiss_index
+UPLOAD_DIR=./.local/uploads
+OLLAMA_BASE_URL=http://localhost:11434
+```
+
+**3. Frontend:**
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Vite serves on <http://localhost:3000> and already proxies `/api` to `http://localhost:8000` (see `vite.config.ts`). To point the frontend at a backend elsewhere, set `VITE_API_URL` instead.
+
+---
 
 ## Air-Gapped Deployment (RHEL 9)
 
-### Phase 1: Prepare the Offline Package (Internet Required)
+### Phase 1 — Build the offline package (internet required)
 
-Run this on a machine with internet access, Docker, Ollama, and Python 3:
+On a staging machine with Docker, Ollama, and Python 3:
 
 ```bash
 cd deploy
-bash sideload.sh
+bash sideload.sh          # or: make prepare-offline
 ```
 
-This will:
-1. Download Docker RPMs for RHEL 9
-2. Build and export all Docker images as `.tar` files (`loomin-frontend`, `loomin-backend`, `ollama/ollama`)
-3. Pull Ollama model weights (llama3.2:1b, gemma3:1b)
-4. Download the `all-MiniLM-L6-v2` embedding model
-5. Copy deployment scripts, Modelfile, and `docker-compose.prod.yml`
-6. Bundle everything into `loomin-docs-package.tar.gz`
+This downloads Docker RPMs for RHEL 9, builds and exports every image as a `.tar`, pulls the Ollama model weights, fetches the `all-MiniLM-L6-v2` embedding model, copies the deployment scripts and `docker-compose.prod.yml`, and bundles it all into `loomin-docs-package.tar.gz` (roughly 15–25 GB).
 
-### Phase 2: Deploy on the Air-Gapped VM
+### Phase 2 — Bootstrap the target VM
 
-Transfer `loomin-docs-package.tar.gz` to the target RHEL 9 VM (e.g., via USB), then:
+Transfer the archive to the air-gapped host, then:
 
 ```bash
 tar -xzf loomin-docs-package.tar.gz
 sudo bash package/setup.sh package/
 ```
 
-The setup script will:
-1. Install Docker Engine from bundled RPMs (with `--disablerepo='*'`)
-2. Load all container images from `.tar` files
-3. Populate Docker volumes (embedding model + Ollama model blobs)
-4. Start the stack using `docker-compose.prod.yml` (no build directives)
-5. Wait for all services to pass health checks (including `ollama create loomin`)
-6. Print access URLs
+The script installs Docker Engine from the bundled RPMs (`--disablerepo='*'`), loads every container image, populates the `embedding-model` and `ollama-data` volumes, brings up `docker-compose.prod.yml`, waits for health checks, and prints the access URLs.
 
-The production compose file (`docker-compose.prod.yml`) has **no build directives** -- it uses only pre-loaded images, so no source code is needed on the target VM.
+`docker-compose.prod.yml` contains **no build directives** and declares its volumes as `external`, so no source code is required on the target host.
 
-## API Documentation
-
-Visit [http://localhost:8000/docs](http://localhost:8000/docs) for interactive Swagger documentation.
-
-### Key Endpoints
-
-| Method | Endpoint                       | Description                            |
-|--------|--------------------------------|----------------------------------------|
-| POST   | `/api/chat`                    | Multi-turn AI chat with RAG (SSE streaming) |
-| POST   | `/api/chat/summarize`          | RAG-grounded text summarization        |
-| POST   | `/api/chat/improve`            | RAG-grounded text improvement          |
-| GET    | `/api/chat/history`            | Retrieve chat message history          |
-| POST   | `/api/documents`               | Create a document                      |
-| GET    | `/api/documents`               | List documents                         |
-| PUT    | `/api/documents/{id}`          | Update document (auto-versions)        |
-| GET    | `/api/documents/{id}/versions` | List document version history          |
-| POST   | `/api/files/upload`            | Upload and index a file for RAG        |
-| GET    | `/api/files`                   | List uploaded files                    |
-| PATCH  | `/api/files/{id}/toggle`       | Enable/disable file for RAG context    |
-| GET    | `/api/files/{id}/chunks`       | View indexed chunks for a file         |
-| DELETE | `/api/files/{id}`              | Remove a file and its index            |
-| GET    | `/api/models`                  | List available Ollama models           |
-| POST   | `/api/tokens/count`            | Segmented token count (doc + chunks)   |
-| WS     | `/ws/collaborate/{doc_id}`     | Real-time presence WebSocket           |
-| GET    | `/health`                      | Backend health check                   |
+---
 
 ## Configuration
 
-All settings are environment-configurable via the backend's `Settings` class:
+Every setting is an environment variable read by the backend's `Settings` class. See [.env.example](.env.example) for a copy-paste starting point.
 
-| Variable                   | Default                 | Description                          |
-|----------------------------|-------------------------|--------------------------------------|
-| `DATABASE_URL`             | `sqlite+aiosqlite:////data/loomin.db` | SQLite connection string |
-| `OLLAMA_BASE_URL`          | `http://ollama:11434`   | Ollama server URL                    |
-| `EMBEDDING_MODEL_PATH`     | `all-MiniLM-L6-v2`     | Path or name of embedding model      |
-| `DEFAULT_MODEL`            | `llama3.2:1b`           | Default Ollama model for chat        |
-| `MAX_CHUNKS_RETRIEVED`     | `5`                     | Top-K chunks for RAG retrieval       |
-| `MIN_SIMILARITY_SCORE`     | `0.25`                  | Minimum FAISS score to include chunk |
-| `MAX_CONVERSATION_HISTORY` | `100`                    | Messages to include in multi-turn context |
+| Variable                   | Default                                 | Description                                     |
+|----------------------------|-----------------------------------------|-------------------------------------------------|
+| `DATABASE_URL`             | `sqlite+aiosqlite:////data/loomin.db`   | SQLAlchemy async connection string              |
+| `OLLAMA_BASE_URL`          | `http://ollama:11434`                   | Ollama server URL                               |
+| `EMBEDDING_MODEL_PATH`     | `all-MiniLM-L6-v2`                      | Model name (downloaded) or local path (offline) |
+| `FAISS_INDEX_PATH`         | `/data/faiss_index`                     | Where the FAISS index is persisted              |
+| `UPLOAD_DIR`               | `/data/uploads`                         | Where uploaded source files are stored          |
+| `DEFAULT_MODEL`            | `llama3.2:1b`                           | Model preselected in the dropdown               |
+| `MAX_CHUNKS_RETRIEVED`     | `5`                                     | Top-K chunks per RAG query                      |
+| `MIN_SIMILARITY_SCORE`     | `0.25`                                  | Minimum FAISS score for a chunk to be included  |
+| `MAX_CONVERSATION_HISTORY` | `100`                                   | Messages carried into multi-turn context        |
 
-## Service Health Check
+---
 
-```bash
-make health
+## API Reference
+
+Interactive Swagger UI: <http://localhost:8000/docs>
+
+| Method | Endpoint                       | Description                                 |
+|--------|--------------------------------|---------------------------------------------|
+| POST   | `/api/chat`                    | Multi-turn chat with RAG (SSE streaming)    |
+| POST   | `/api/chat/summarize`          | RAG-grounded summarization of a selection   |
+| POST   | `/api/chat/improve`            | RAG-grounded rewrite of a selection         |
+| GET    | `/api/chat/history`            | Retrieve chat message history               |
+| POST   | `/api/documents`               | Create a document                           |
+| GET    | `/api/documents`               | List documents                              |
+| PUT    | `/api/documents/{id}`          | Update a document (auto-creates a version)  |
+| GET    | `/api/documents/{id}/versions` | List a document's version history           |
+| POST   | `/api/files/upload`            | Upload and index a file for RAG             |
+| GET    | `/api/files`                   | List uploaded files                         |
+| PATCH  | `/api/files/{id}/toggle`       | Enable/disable a file as RAG context        |
+| GET    | `/api/files/{id}/chunks`       | Inspect a file's indexed chunks             |
+| DELETE | `/api/files/{id}`              | Delete a file and remove it from the index  |
+| GET    | `/api/models`                  | List models available in Ollama             |
+| POST   | `/api/tokens/count`            | Segmented token count (document + chunks)   |
+| GET    | `/health`                      | Backend health check                        |
+
+---
+
+## Project Structure
+
+```
+loomin-docs/
+├── frontend/                       # React + TypeScript SPA
+│   ├── Dockerfile                  # Multi-stage: Node 20 builder → Nginx Alpine
+│   ├── nginx.conf                  # SPA fallback + /api proxy (buffering off for SSE)
+│   ├── public/favicon.svg
+│   └── src/
+│       ├── App.tsx                 # Root component: state, handlers, hook wiring
+│       ├── components/
+│       │   ├── Editor/
+│       │   │   ├── Editor.tsx      # TipTap editor with BubbleMenu + imperative handles
+│       │   │   └── Toolbar.tsx     # Formatting toolbar
+│       │   ├── Layout.tsx          # Header: title, save status, word count, export
+│       │   ├── Sidebar/
+│       │   │   ├── Sidebar.tsx     # Three-tab container (Chat, Files, History)
+│       │   │   ├── ChatPanel.tsx   # SSE streaming, citations, Accept/Discard
+│       │   │   ├── FilesPanel.tsx  # Upload, toggle, chunk previews
+│       │   │   ├── VersionPanel.tsx# Version browse / preview / restore
+│       │   │   └── ModelSelector.tsx
+│       │   └── TokenVisualization/
+│       │       └── TokenBar.tsx    # Segmented context-window bar
+│       ├── hooks/useApi.ts         # useDocuments, useChat, useFiles, useModels, useTokenCount
+│       ├── services/api.ts         # HTTP client and SSE parser
+│       └── types/index.ts          # Shared TypeScript interfaces
+├── backend/                        # Python + FastAPI service
+│   ├── Dockerfile                  # python:3.11-slim
+│   ├── Modelfile                   # Ollama Modelfile documenting the system prompt
+│   ├── requirements.txt
+│   └── app/
+│       ├── main.py                 # App factory: lifespan, CORS, routers, /health
+│       ├── core/
+│       │   ├── config.py           # Pydantic Settings
+│       │   ├── pii.py              # PII sanitization (6 patterns, offset tracking)
+│       │   └── tracing.py          # RequestTrace dataclass
+│       ├── api/routes/
+│       │   ├── chat.py             # Chat (SSE), summarize, improve
+│       │   ├── documents.py        # CRUD with auto-versioning
+│       │   ├── files.py            # Upload, toggle, chunks, delete
+│       │   └── models.py           # Model list + segmented token count
+│       ├── rag/
+│       │   ├── embeddings.py       # sentence-transformers wrapper
+│       │   ├── indexer.py          # FAISS IndexFlatIP (thread-safe, disk-persisted)
+│       │   └── retriever.py        # Similarity search over active files
+│       ├── services/
+│       │   ├── ollama.py           # Async client (generate, chat_stream, list_models)
+│       │   └── document.py         # PDF/MD/TXT parsing, chunking, token estimation
+│       └── models/
+│           ├── database.py         # SQLAlchemy models + lightweight migrations
+│           └── schemas.py          # Pydantic request/response schemas
+├── deploy/
+│   ├── docker-compose.yml          # Development (builds from source)
+│   ├── docker-compose.prod.yml     # Air-gapped production (image-only)
+│   ├── ollama-entrypoint.sh        # Model preload + readiness marker
+│   ├── setup.sh                    # RHEL 9 offline bootstrap
+│   ├── sideload.sh                 # Offline package builder
+│   └── Makefile                    # build / up / down / logs / health targets
+├── ARCHITECTURE.md                 # System architecture and data flows
+├── CONTRIBUTING.md                 # How to set up, build, and submit changes
+├── SECURITY.md                     # Threat model and vulnerability reporting
+├── CODE_OF_CONDUCT.md
+└── LICENSE                         # MIT
 ```
 
-Reports HTTP status of frontend (:80), backend (:8000), and Ollama (:11434).
+---
+
+## Roadmap
+
+Loomin-Docs is a working single-user application. These are the areas where help is most valuable — see [CONTRIBUTING.md](CONTRIBUTING.md) and the issue tracker.
+
+- [ ] **Automated test suite** — no tests exist yet. Pytest for the backend (RAG retrieval, PII sanitization, chunking) and Vitest for the frontend would be the highest-impact contribution.
+- [ ] **Real-time collaboration** — multi-user presence and CRDT-based co-editing over WebSockets. Nothing is implemented today; the app is single-user.
+- [ ] **Authentication and multi-tenancy** — there is currently no auth layer and no per-user data isolation.
+- [ ] **PostgreSQL + pgvector option** — as an alternative to SQLite plus a file-backed FAISS index.
+- [ ] **Additional file formats** — `.docx`, `.html`, and `.csv` ingestion.
+- [ ] **GPU deployment guide** — Compose overlay for NVIDIA runtime.
+- [ ] **Reranking** — a cross-encoder pass over FAISS candidates to sharpen retrieval.
+- [ ] **Frontend linting** — ESLint and Prettier config, wired into CI.
+
+---
+
+## Contributing
+
+Contributions are very welcome — bug reports, docs, and code alike. Start with [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, coding conventions, and the pull request process. All participants are expected to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+Good first issues: anything under [Roadmap](#roadmap), especially the test suite and frontend linting.
+
+---
+
+## Security
+
+Loomin-Docs ships **without authentication** and binds its API to all interfaces. It is designed for trusted networks. Do not expose it directly to the public internet without putting your own authentication and TLS termination in front of it.
+
+To report a vulnerability, please follow the process in [SECURITY.md](SECURITY.md) rather than opening a public issue.
+
+---
+
+## License
+
+Released under the [MIT License](LICENSE). © 2026 Mohammed Sheriff.
+
+Note that the models and dependencies Loomin-Docs orchestrates carry their own licenses — including Llama 3.2 (Llama Community License), Gemma (Gemma Terms of Use), and `all-MiniLM-L6-v2` (Apache 2.0). Review them before commercial deployment.
+
+---
+
+## Acknowledgements
+
+Built on the work of [Ollama](https://ollama.com), [TipTap](https://tiptap.dev), [FastAPI](https://fastapi.tiangolo.com), [FAISS](https://faiss.ai), [sentence-transformers](https://sbert.net), [PyMuPDF](https://pymupdf.readthedocs.io), and [TailwindCSS](https://tailwindcss.com).

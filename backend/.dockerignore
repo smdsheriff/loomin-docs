@@ -1,0 +1,32 @@
+# Python bytecode and caches
+__pycache__
+*.pyc
+*.pyo
+.ruff_cache
+.pytest_cache
+*.egg-info
+
+# Virtual environments — host-platform packages would shadow the image's
+.venv
+venv
+env
+
+# Local runtime data
+.local
+data
+uploads
+*.db
+*.faiss
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Docker
+Dockerfile
+.dockerignore
+
+# OS
+.DS_Store
+Thumbs.db

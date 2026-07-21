@@ -57,7 +57,7 @@ def _build_rag_prompt(
     file_inventory = ""
     if available_files:
         file_lines = [f"  - {f['name']} ({f['type']}, {f['chunks']} chunks)" for f in available_files]
-        file_inventory = f"Uploaded files available:\n" + "\n".join(file_lines) + "\n\n"
+        file_inventory = "Uploaded files available:\n" + "\n".join(file_lines) + "\n\n"
 
     # Build document editor context section
     doc_context = ""
@@ -102,7 +102,7 @@ def _build_rag_prompt(
             text = chunk["chunk_text"]
             context_parts.append(f"[Source {i}: {source} (chunk {idx})]\n{text}")
         file_context = (
-            f"--- UPLOADED FILE CONTEXT ---\n"
+            "--- UPLOADED FILE CONTEXT ---\n"
             + "\n\n".join(context_parts)
             + "\n--- END UPLOADED FILE CONTEXT ---\n\n"
         )

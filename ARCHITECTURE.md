@@ -4,7 +4,9 @@ This document describes the system architecture, data flows, component responsib
 
 ## System Overview
 
-Loomin-Docs is a three-container application orchestrated by Docker Compose. All containers communicate over an internal bridge network (`loomin-net`). The only externally exposed port in production is port 80 (Nginx), which serves the frontend, proxies API requests to the backend, and upgrades WebSocket connections for real-time collaboration.
+Loomin-Docs is a three-container application orchestrated by Docker Compose. All containers communicate over an internal bridge network (`loomin-net`). Port 80 (Nginx) serves the frontend and reverse-proxies API requests to the backend; it is the only port that needs to be reachable in production.
+
+> Both Compose files also publish ports 8000 and 11434 on the host for debugging. See [SECURITY.md](SECURITY.md) for how to close them in a hardened deployment.
 
 ```mermaid
 graph TB
@@ -27,9 +29,7 @@ graph TB
     end
 
     User -->|"HTTP :80"| FE
-    User <-->|"WebSocket /ws/*"| FE
-    FE -->|"Reverse Proxy<br/>/api/* -> :8000"| BE
-    FE <-->|"WebSocket Proxy<br/>/ws/* -> :8000"| BE
+    FE -->|"Reverse Proxy<br/>/api/* -> :8000<br/>(buffering off for SSE)"| BE
     BE -->|"Multi-turn /api/chat<br/>+ /api/generate"| OL
 
     BE --- V1
@@ -55,7 +55,6 @@ graph TB
 - **Responsibilities**:
   - Serve the compiled React SPA (TipTap editor, AI sidebar, file manager)
   - Reverse-proxy all `/api/*` requests to the backend on port 8000
-  - WebSocket proxy for `/ws/*` with 24h timeout for real-time collaboration
   - Handle file uploads up to 100 MB (`client_max_body_size 100M`)
   - Proxy timeouts: 600s read/send for long LLM inference
 - **Port**: 80 (exposed to host)
@@ -68,17 +67,15 @@ graph TB
   - `Sidebar/VersionPanel.tsx` -- Version history browser with preview, restore, time-ago display
   - `Sidebar/ModelSelector.tsx` -- Dropdown toggling between Ollama models with size display
   - `TokenVisualization/TokenBar.tsx` -- Segmented context window bar (blue=doc, amber=files, gray=free)
-  - `Layout.tsx` -- Header bar with editable title, save status, presence avatars, word count, export dropdown, keyboard shortcuts
+  - `Layout.tsx` -- Header bar with editable title, save status, word count, export dropdown, keyboard shortcuts, resizable sidebar divider
 - **Hooks**:
   - `useApi.ts` -- `useDocuments`, `useChat`, `useFiles`, `useModels`, `useTokenCount` with debounced API calls
-  - `usePresence.ts` -- WebSocket hook for real-time user presence per document
 
 ### Backend (FastAPI)
 
 - **Image**: `loomin-backend:latest` (Python 3.11 slim)
 - **Responsibilities**:
   - RESTful API for chat, documents, files, models, and token counting
-  - WebSocket endpoint for real-time collaboration presence (`/ws/collaborate/{document_id}`)
   - Multi-turn conversation: fetches recent history from SQLite, assembles messages array
   - Dual-context RAG pipeline: query embedding -> FAISS search (threshold >= 0.25) -> context injection from BOTH active editor content AND uploaded file chunks
   - RAG-grounded Summarize/Improve: retrieves relevant file chunks for contextual rewrites with inline citations
@@ -105,17 +102,16 @@ graph TB
 
 - **Image**: `ollama/ollama:latest`
 - **Responsibilities**:
-  - Serve multiple language models (llama3.2:1b, gemma3:1b, llama3.2:1b)
+  - Serve the language models listed in `OLLAMA_MODELS` (`llama3.2:1b` and `gemma3:1b` by default)
   - Provide `/api/chat` (multi-turn) and `/api/generate` (single-shot) inference APIs
   - Auto-pull models on first boot via `ollama-entrypoint.sh`
-  - Create custom `loomin` model from mounted Modelfile (`ollama create loomin -f /Modelfile`)
-  - Graceful fallback in air-gapped mode (pre-loaded models from volume)
+  - Graceful fallback in air-gapped mode (pre-loaded models from volume; pull failures are expected and non-fatal)
 - **Port**: 11434
 - **Volumes**:
   - `ollama-data:/root/.ollama` -- Model weights, manifests
-  - `Modelfile:/Modelfile` -- Custom model definition (mounted read-only)
-- **Health Check**: `test -f /tmp/.ollama-models-ready` (marker created after all models loaded + custom model created)
-- **Entrypoint**: Custom `ollama-entrypoint.sh` starts server, pulls/verifies models, runs `ollama create`, creates readiness marker
+  - `ollama-entrypoint.sh:/ollama-entrypoint.sh` -- Startup script (mounted read-only)
+- **Health Check**: `test -f /tmp/.ollama-models-ready` (marker written once model loading finishes)
+- **Entrypoint**: Custom `ollama-entrypoint.sh` starts the server, pulls or verifies each model with a 10s timeout, then creates the readiness marker the backend's `depends_on` waits for
 
 ## Database Schema (5 Tables)
 
@@ -180,8 +176,9 @@ The application uses lightweight SQLite-specific migrations (no Alembic dependen
 | Compose file | `docker-compose.yml` (with `build:` directives) | `docker-compose.prod.yml` (image-only, no build) |
 | Images | Built from source via `docker compose up --build` | Pre-loaded from `.tar` via `docker load -i` |
 | Ollama models | Pulled from registry on first boot | Pre-loaded in `ollama-data` volume by `setup.sh` |
-| Custom model | Created via `ollama create loomin -f /Modelfile` | Same -- Modelfile mounted from package |
+| System prompt | Applied at the API level in `chat.py` | Same -- no model-side customization needed |
 | Embedding model | Auto-downloaded from HuggingFace if missing | Pre-loaded in `embedding-model` volume by `setup.sh` |
+| Volumes | Created by Compose | Declared `external` -- populated by `setup.sh` first |
 | Docker RPMs | Already installed | Installed from bundled RPMs by `setup.sh` |
 
 ## Data Flow Diagrams
@@ -295,30 +292,13 @@ sequenceDiagram
     FE-->>U: Document updated + confirmation message
 ```
 
-### Real-Time Collaboration Presence
+## Not Yet Implemented
 
-```mermaid
-sequenceDiagram
-    participant A as User A
-    participant FE as Nginx
-    participant BE as FastAPI (PresenceManager)
-    participant B as User B
+The application is **single-user**. There is no real-time collaboration layer: no WebSocket endpoints, no presence tracking, and no CRDT or operational-transform merge. Two browsers editing the same document will overwrite each other on save, with the losing revision recoverable from version history.
 
-    A->>FE: WebSocket /ws/collaborate/{doc_id}
-    FE->>BE: Upgrade connection
-    BE-->>A: {type: "presence_state", your_id, your_color, users: [A]}
+Adding multi-user co-editing would require a WebSocket route on the backend, a `/ws/*` proxy block in `nginx.conf` (currently absent), and a CRDT binding such as Yjs on the TipTap side. This is tracked under [Roadmap](README.md#roadmap).
 
-    B->>FE: WebSocket /ws/collaborate/{doc_id}
-    FE->>BE: Upgrade connection
-    BE-->>B: {type: "presence_state", your_id, your_color, users: [A, B]}
-    BE-->>A: {type: "user_joined", user: B, users: [A, B]}
-
-    A->>BE: {type: "cursor_move", pos: 42}
-    BE-->>B: {type: "cursor_update", user_id: A, cursor_pos: 42}
-
-    B->>BE: Connection closed
-    BE-->>A: {type: "user_left", user_id: B, users: [A]}
-```
+There is also no authentication layer and no automated test suite — see [SECURITY.md](SECURITY.md) and [CONTRIBUTING.md](CONTRIBUTING.md) respectively.
 
 ## Security Considerations
 
@@ -376,10 +356,10 @@ Layer 3: SYSTEM PROMPT (7 rules, always active)
 
 ### Network Isolation
 
-- Docker bridge network (`loomin-net`) is internal only
-- In air-gapped environment, the host has no outbound internet
-- Ports 8000 and 11434 can be restricted to `127.0.0.1` in production
-- WebSocket connections proxied through Nginx (no direct backend exposure)
+- Docker bridge network (`loomin-net`) carries all inter-container traffic
+- In an air-gapped environment, the host has no outbound internet
+- Ports 8000 and 11434 are published to the host by default for debugging and **should** be bound to `127.0.0.1` or unmapped in production
+- The application has no authentication of its own; see [SECURITY.md](SECURITY.md) for the full threat model and hardening checklist
 
 ## Token Estimation
 
@@ -404,7 +384,6 @@ Context window sizes are resolved from a built-in model lookup table with prefix
 | Embedding a query          | 20-100 ms              | CPU-bound model inference     |
 | LLM response (first token) | 1-5 seconds           | Model loading / prompt eval   |
 | LLM response (streaming)  | 10-60 seconds total    | Token generation speed        |
-| WebSocket presence event   | < 10 ms                | In-memory broadcast           |
 | Version history fetch      | < 50 ms                | SQLite query                  |
 
 ### Resource Requirements
@@ -442,13 +421,12 @@ ollama-data (/root/.ollama)
         └── registry.ollama.ai/
             └── library/
                 ├── llama3.2/
-                ├── gemma3/
                 └── gemma3/
 ```
 
 ## Modelfile
 
-The custom `loomin` model is created automatically at container startup via `ollama create loomin -f /Modelfile`. The Modelfile is mounted from `backend/Modelfile` into the Ollama container.
+`backend/Modelfile` is a valid Ollama Modelfile that documents the assistant's system prompt and sampling parameters:
 
 ```
 FROM llama3.2:1b
@@ -457,16 +435,20 @@ PARAMETER temperature 0.7
 PARAMETER top_p 0.9
 ```
 
-The same system prompt is also injected at the API level in `chat.py` for all models (not just `loomin`), ensuring consistent behavior regardless of which model the user selects.
+**It is not loaded at runtime.** The entrypoint deliberately does *not* run `ollama create`, because the same system prompt is injected at the API level in `chat.py` for every model. Applying it in both places would duplicate the prompt for anyone who selected the derived model. The Modelfile is kept as reference documentation, and you can load it manually if you want a standalone model:
+
+```bash
+ollama create loomin -f backend/Modelfile
+```
 
 ## Nginx Proxy Configuration
 
 ```
 /           -> Static React SPA (try_files with SPA fallback)
-/api/*      -> Backend :8000 (HTTP 1.1, buffering off, 600s timeout)
-/ws/*       -> Backend :8000 (WebSocket upgrade, 86400s timeout)
+/api/*      -> Backend :8000 (HTTP 1.1, buffering off, 600s read/send timeout)
 ```
 
 - `client_max_body_size 100M` for file uploads
-- WebSocket proxy uses `Connection: "upgrade"` header with 24-hour idle timeout
-- API proxy disables buffering and caching for SSE streaming compatibility
+- The API proxy disables buffering and caching so SSE tokens stream through immediately
+- `proxy_read_timeout 600s` accommodates slow CPU-bound generation
+- There is no `/ws/*` block — the application does not use WebSockets
