@@ -300,6 +300,62 @@ Adding multi-user co-editing would require a WebSocket route on the backend, a `
 
 There is also no authentication layer and no automated test suite — see [SECURITY.md](SECURITY.md) and [CONTRIBUTING.md](CONTRIBUTING.md) respectively.
 
+## LangGraph RAG Pipeline (Optional)
+
+`/api/chat` has two interchangeable implementations selected by the
+`USE_LANGGRAPH` setting. With the flag **off** (default), the request handler
+runs the inline pipeline described above and `langgraph` is never imported. With
+the flag **on**, the same steps run as an explicit LangGraph, split into two
+compiled graphs so that error semantics match the legacy path exactly.
+
+```mermaid
+graph LR
+    subgraph Handler["Request handler (request-scoped session)"]
+        direction LR
+        P1["retrieve<br/>(embed + FAISS + sanitize)"] --> P2["inventory"] --> P3["build_prompt<br/>(assemble messages)"]
+    end
+    subgraph Stream["StreamingResponse body"]
+        G1["generate<br/>(stream tokens via StreamWriter)"]
+    end
+    Handler -->|"prepared state"| Stream
+    G1 --> FIN["final: metadata + citations"]
+```
+
+**Why two graphs.** The *prep graph* (`retrieve → inventory → build_prompt`) runs
+eagerly via `prep_graph.ainvoke(...)` **before** the `StreamingResponse` is
+returned, using the still-open request session. A failure there (e.g. a missing
+FAISS index) propagates as **HTTP 500 with nothing persisted** — identical to the
+legacy pipeline, which performs retrieval in the handler body. The *generation
+graph* is a single `generate` node streamed with
+`astream(stream_mode=["custom", "values"])`: the `custom` channel carries
+per-token dicts emitted through an injected `StreamWriter`, and the last
+`values` snapshot carries the final citations and trace metadata.
+
+**Design choices**
+
+- **No LangChain model wrapper.** The `generate` node calls the project's own
+  `ollama_service` directly, so no `langchain-ollama` dependency is introduced
+  and the existing connection/timeout handling is reused.
+- **Request-scoped objects in state.** The live SQLAlchemy session and the
+  `RequestTrace` pass through graph state. This is safe because the graphs are
+  compiled without a checkpointer — state is an in-memory dict that is never
+  serialized. Each request supplies its own `initial_state`, so concurrent
+  requests are isolated.
+- **Parity.** Prompt construction lives in `app/rag/prompting.py`, imported by
+  both pipelines, so the two cannot drift. The PII sanitization points, SSE frame
+  format, citation/metadata shape, `[:-1]` history exclusion, and assistant
+  persistence are all reproduced.
+
+**Extension point.** Retrieval-quality nodes (query rewriting, cross-encoder
+reranking, LLM document grading, self-correction loops) slot in between
+`retrieve` and `build_prompt` in the prep graph. A cross-encoder reranker would
+add a second model to the `embedding-model` volume and to `sideload.sh`.
+
+**Dependencies.** `langgraph` and `langchain-core` are pinned in
+`requirements.txt` and baked into the backend image at build time. `sideload.sh`
+needs no change — but the backend image must be rebuilt so the offline bundle
+captures the new wheels.
+
 ## Security Considerations
 
 ### PII Sanitization Flow

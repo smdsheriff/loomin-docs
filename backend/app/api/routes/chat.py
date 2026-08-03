@@ -1,6 +1,5 @@
 import json
 import logging
-import re
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -21,101 +20,18 @@ from app.models.schemas import (
     SummarizeRequest,
     SummarizeResponse,
 )
+from app.rag.prompting import SYSTEM_PROMPT, build_rag_prompt
 from app.rag.retriever import retrieve_relevant_chunks
 from app.services.ollama import ollama_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
-_SYSTEM_PROMPT = (
-    "You are Loomin, an intelligent document assistant. "
-    "You MUST follow these rules strictly:\n"
-    "1. ONLY answer questions using the provided context (current document content and/or uploaded files).\n"
-    "2. NEVER use your training knowledge to answer factual questions about documents.\n"
-    "3. Always cite your sources using [Source N] notation when referencing uploaded files.\n"
-    "4. When the user asks about their current document, use the CURRENT DOCUMENT section.\n"
-    "5. If the provided context does not contain the answer, clearly state: "
-    "'Based on the available documents, I don't have information about that.'\n"
-    "6. If no context is provided, tell the user to upload relevant files or write content in the editor first.\n"
-    "7. Be concise, helpful, and professional."
-)
-
-
-def _build_rag_prompt(
-    user_message: str,
-    context_chunks: list[dict],
-    available_files: list[dict] | None = None,
-    document_content: str | None = None,
-) -> str:
-    """Build a prompt that injects retrieved context before the user question.
-
-    Context is assembled from two sources:
-    1. The current document editor content (the text the user is working on)
-    2. Uploaded files chunks retrieved via FAISS similarity search
-    """
-    # Build file inventory so the model knows what files the user has uploaded
-    file_inventory = ""
-    if available_files:
-        file_lines = [f"  - {f['name']} ({f['type']}, {f['chunks']} chunks)" for f in available_files]
-        file_inventory = "Uploaded files available:\n" + "\n".join(file_lines) + "\n\n"
-
-    # Build document editor context section
-    doc_context = ""
-    if document_content and document_content.strip():
-        # Strip HTML tags for plain-text context
-        plain_text = re.sub(r"<[^>]+>", " ", document_content)
-        plain_text = re.sub(r"\s+", " ", plain_text).strip()
-        if plain_text:
-            # Limit to ~2000 chars to avoid overwhelming the context window
-            truncated = plain_text[:2000]
-            if len(plain_text) > 2000:
-                truncated += "... [truncated]"
-            doc_context = (
-                f"--- CURRENT DOCUMENT ---\n{truncated}\n--- END DOCUMENT ---\n\n"
-            )
-
-    has_any_context = bool(context_chunks) or bool(doc_context)
-
-    if not has_any_context:
-        if not available_files:
-            return (
-                "The user has not uploaded any files yet and the document is empty. "
-                "Do NOT answer from your own knowledge. Instead, tell the user to "
-                "upload .pdf, .md, or .txt files first for accurate answers.\n\n"
-                f"Question: {user_message}"
-            )
-        return (
-            f"{file_inventory}"
-            "No relevant content was found in the uploaded files for this question. "
-            "Do NOT answer from your own knowledge. Tell the user that the uploaded "
-            "files do not contain information about their question.\n\n"
-            f"Question: {user_message}"
-        )
-
-    # Build uploaded file chunks section
-    file_context = ""
-    if context_chunks:
-        context_parts: list[str] = []
-        for i, chunk in enumerate(context_chunks, 1):
-            source = chunk["source_file"]
-            idx = chunk["chunk_index"]
-            text = chunk["chunk_text"]
-            context_parts.append(f"[Source {i}: {source} (chunk {idx})]\n{text}")
-        file_context = (
-            "--- UPLOADED FILE CONTEXT ---\n"
-            + "\n\n".join(context_parts)
-            + "\n--- END UPLOADED FILE CONTEXT ---\n\n"
-        )
-
-    return (
-        f"{file_inventory}"
-        f"{doc_context}"
-        f"{file_context}"
-        f"Answer the question using ONLY the context above (current document and/or uploaded files). "
-        f"If the answer is not in the context, say you don't have that information. "
-        f"Cite sources using [Source N] notation when referencing uploaded files.\n\n"
-        f"Question: {user_message}"
-    )
+# Prompt construction lives in app.rag.prompting so the legacy pipeline and the
+# LangGraph pipeline share one source of truth. Aliased here to keep the module
+# names used below unchanged.
+_SYSTEM_PROMPT = SYSTEM_PROMPT
+_build_rag_prompt = build_rag_prompt
 
 
 @router.post("")
@@ -150,6 +66,13 @@ async def chat(
     history_result = await session.execute(history_stmt)
     # Reverse to chronological order (query returns newest first)
     history_messages = list(reversed(history_result.scalars().all()))
+
+    # Route through the LangGraph pipeline when enabled. Behavior and SSE framing
+    # are identical to the legacy path below; the flag exists for safe rollout.
+    if settings.USE_LANGGRAPH:
+        return await _chat_via_graph(
+            body, session, trace, sanitized_message, redactions, history_messages, model
+        )
 
     # Retrieve relevant chunks via RAG
     with trace.trace_retrieval():
@@ -240,6 +163,84 @@ async def chat(
                     document_id=body.document_id,
                     role="assistant",
                     content="".join(full_response),
+                    metadata_json=json.dumps(metadata),
+                )
+                persist_session.add(assistant_msg)
+                await persist_session.commit()
+        except Exception as exc:
+            logger.error("Failed to persist assistant message: %s", exc)
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+async def _chat_via_graph(
+    body: ChatRequest,
+    session: AsyncSession,
+    trace: RequestTrace,
+    sanitized_message: str,
+    redactions: list,
+    history_messages: list,
+    model: str,
+) -> StreamingResponse:
+    """LangGraph-backed equivalent of ``chat``'s streaming body.
+
+    Mirrors the legacy path's structure and error semantics:
+
+    * Retrieval, inventory, and prompt assembly run **eagerly here** (via the
+      prep graph) using the still-open request-scoped ``session``. A failure in
+      this phase propagates as HTTP 500 with nothing persisted — identical to
+      the legacy pipeline, which does retrieval before returning the stream.
+    * Only token generation streams inside the response body. Assistant
+      persistence uses a fresh ``async_session()`` because the request session
+      is closed once ``StreamingResponse`` is returned.
+    """
+    # Lazy import so the (default) legacy path never requires langgraph.
+    from app.rag.graph import prepare_chat_state, stream_generation
+
+    # Sanitized prior turns, excluding the just-persisted current user message
+    history_payload: list[dict[str, str]] = []
+    for msg in history_messages[:-1]:
+        sanitized_hist, _ = sanitize(msg.content)
+        history_payload.append({"role": msg.role, "content": sanitized_hist})
+
+    sanitized_doc_content = None
+    if body.document_content:
+        sanitized_doc_content, _ = sanitize(body.document_content)
+
+    initial_state = {
+        "user_message": sanitized_message,
+        "document_id": body.document_id,
+        "model": model,
+        "document_content": sanitized_doc_content,
+        "history": history_payload,
+        "redactions": len(redactions),
+        "session": session,
+        "trace": trace,
+    }
+
+    # Eager prep — failures propagate as HTTP 500 (matches legacy), before any
+    # streaming begins and before any assistant row is written.
+    prepared_state = await prepare_chat_state(initial_state)
+
+    async def event_stream():
+        full_response = ""
+        metadata: dict = {}
+
+        async for event in stream_generation(prepared_state):
+            if event["type"] == "token":
+                yield f"data: {json.dumps({'token': event['token']})}\n\n"
+            elif event["type"] == "final":
+                metadata = event["metadata"]
+                full_response = event["full_response"]
+                yield f"data: {json.dumps({'done': True, 'metadata': metadata})}\n\n"
+
+        # Persist assistant message with a fresh session (mirrors legacy path)
+        try:
+            async with async_session() as persist_session:
+                assistant_msg = ChatMessage(
+                    document_id=body.document_id,
+                    role="assistant",
+                    content=full_response,
                     metadata_json=json.dumps(metadata),
                 )
                 persist_session.add(assistant_msg)

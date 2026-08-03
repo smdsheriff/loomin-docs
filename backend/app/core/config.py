@@ -14,6 +14,12 @@ class Settings(BaseSettings):
     MIN_SIMILARITY_SCORE: float = 0.25
     MAX_CONVERSATION_HISTORY: int = 100
 
+    # When true, /api/chat routes through the LangGraph RAG pipeline
+    # (app.rag.graph). When false (default), the original inline pipeline is
+    # used. Both produce identical output and SSE framing — the flag exists so
+    # the graph can be rolled out and rolled back without code changes.
+    USE_LANGGRAPH: bool = False
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",

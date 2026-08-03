@@ -34,6 +34,26 @@ jobs:
       - name: Byte-compile
         run: python -m compileall -q backend/app
 
+  backend-tests:
+    name: Backend (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests
+        working-directory: backend
+        run: pytest
+
   frontend:
     name: Frontend (typecheck + build)
     runs-on: ubuntu-latest

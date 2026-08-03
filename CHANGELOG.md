@@ -8,11 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Optional LangGraph RAG pipeline** (`app/rag/graph.py`), behind the `USE_LANGGRAPH` flag (default `false`). When enabled, `/api/chat` routes through an explicit graph — a prep graph (retrieve → inventory → build prompt) that runs eagerly, then a streaming generation graph — while producing output, SSE framing, and error semantics identical to the original inline pipeline. The graph reuses the project's own retriever, embedder, and Ollama client (no `langchain-ollama` dependency) and is the foundation for future retrieval-quality nodes (query rewrite, reranking, document grading). Backward compatible: with the flag off, `langgraph` is not imported and the original code path is unchanged.
+- First backend test suite (`backend/tests/`): prompt-parity, graph-unit (streaming, citations, message assembly, generation-error handling), a backward-compat guard that retrieval failures still raise (HTTP 500, not a degraded 200 stream), and route-level SSE tests covering both the legacy and LangGraph paths.
+- `backend/requirements-dev.txt` and `backend/pytest.ini` for the test toolchain.
 - MIT `LICENSE`.
 - `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1), and `SECURITY.md` with a documented threat model.
 - `.env.example` covering every supported setting.
 - GitHub issue templates, pull request template, and Dependabot configuration.
-- Continuous integration: `ruff` lint plus bytecode compilation for the backend, TypeScript build for the frontend, and Docker image builds.
+- Continuous integration: `ruff` lint, `pytest`, and bytecode compilation for the backend, TypeScript build for the frontend, and Docker image builds.
 - `.editorconfig`.
 
 ### Changed

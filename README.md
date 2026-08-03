@@ -213,8 +213,51 @@ Every setting is an environment variable read by the backend's `Settings` class.
 | `MAX_CHUNKS_RETRIEVED`     | `5`                                     | Top-K chunks per RAG query                      |
 | `MIN_SIMILARITY_SCORE`     | `0.25`                                  | Minimum FAISS score for a chunk to be included  |
 | `MAX_CONVERSATION_HISTORY` | `100`                                   | Messages carried into multi-turn context        |
+| `USE_LANGGRAPH`            | `false`                                 | Route `/api/chat` through the LangGraph pipeline (see below) |
 
 ---
+
+## Optional: LangGraph RAG Pipeline
+
+`/api/chat` ships with two interchangeable implementations of the same RAG
+pipeline, selected by the `USE_LANGGRAPH` flag:
+
+- **Default (`false`)** — the original inline pipeline. `langgraph` is not
+  imported at all on this path.
+- **Enabled (`true`)** — the request is orchestrated by [LangGraph](https://langchain-ai.github.io/langgraph/):
+  a **prep graph** (retrieve → file inventory → prompt assembly) runs to
+  completion first, then a **generation graph** streams tokens. Both paths
+  produce identical output, identical SSE framing, and identical error semantics
+  (a retrieval failure returns HTTP 500 either way; a generation error streams an
+  `[Error: …]` token — matching the original).
+
+The graph exists as a foundation for retrieval-quality features — query
+rewriting, cross-encoder reranking, document grading, self-correction loops —
+which slot in as additional nodes. It reuses the project's own retriever,
+embedder, and Ollama client, so no `langchain-ollama` dependency is added. See
+[ARCHITECTURE.md](ARCHITECTURE.md#langgraph-rag-pipeline-optional) for the node
+diagram.
+
+Enable it per deployment (and flip back to `false` to roll back instantly — no
+different image required):
+
+```bash
+# .env or the backend service environment
+USE_LANGGRAPH=true
+```
+
+Air-gapped bundles built by `sideload.sh` already include `langgraph` (it is
+baked into the backend image from `requirements.txt`); just rebuild the image so
+the updated dependencies are captured.
+
+Backend tests live in `backend/tests/` and run fully offline (Ollama and
+retrieval are mocked):
+
+```bash
+cd backend
+pip install -r requirements-dev.txt
+pytest
+```
 
 ## API Reference
 
@@ -312,13 +355,14 @@ loomin-docs/
 
 Loomin-Docs is a working single-user application. These are the areas where help is most valuable — see [CONTRIBUTING.md](CONTRIBUTING.md) and the issue tracker.
 
-- [ ] **Automated test suite** — no tests exist yet. Pytest for the backend (RAG retrieval, PII sanitization, chunking) and Vitest for the frontend would be the highest-impact contribution.
+- [x] **LangGraph orchestration** — `/api/chat` can run through an explicit graph (opt-in via `USE_LANGGRAPH`), the foundation for the retrieval-quality nodes below.
+- [~] **Automated test suite** — the backend now has a `pytest` suite (`backend/tests/`) covering the RAG graph, prompt building, and the chat route. Still wanted: PII/chunking unit tests and a frontend Vitest suite.
+- [ ] **Query rewriting / reranking / document grading** — additional LangGraph nodes: a cross-encoder pass over FAISS candidates, an LLM relevance gate, and conversational query reformulation.
 - [ ] **Real-time collaboration** — multi-user presence and CRDT-based co-editing over WebSockets. Nothing is implemented today; the app is single-user.
 - [ ] **Authentication and multi-tenancy** — there is currently no auth layer and no per-user data isolation.
 - [ ] **PostgreSQL + pgvector option** — as an alternative to SQLite plus a file-backed FAISS index.
 - [ ] **Additional file formats** — `.docx`, `.html`, and `.csv` ingestion.
 - [ ] **GPU deployment guide** — Compose overlay for NVIDIA runtime.
-- [ ] **Reranking** — a cross-encoder pass over FAISS candidates to sharpen retrieval.
 - [ ] **Frontend linting** — ESLint and Prettier config, wired into CI.
 
 ---

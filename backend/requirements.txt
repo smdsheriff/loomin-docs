@@ -9,3 +9,5 @@ httpx==0.27.0
 python-multipart==0.0.9
 pydantic-settings==2.5.0
 numpy==1.26.4
+langgraph==0.2.60
+langchain-core==0.3.28
