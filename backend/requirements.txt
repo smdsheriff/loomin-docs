@@ -1,7 +1,7 @@
 fastapi==0.115.0
 uvicorn[standard]==0.30.0
 sqlalchemy[asyncio]==2.0.35
-aiosqlite==0.20.0
+aiosqlite==0.22.1
 faiss-cpu==1.8.0
 sentence-transformers==3.1.0
 PyMuPDF==1.24.0
